@@ -4,53 +4,73 @@
 #include <coroutine>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 
-// Simplified concept for demonstration.
 template <typename T>
 concept ElementType = std::is_trivial_v<T>;
 
-// Fast-access and freeze array.
 template <ElementType T>
 class FastAccessFreezeArray {
 public:
     FastAccessFreezeArray(size_t capacity)
-        : capacity_(capacity), data_(new T[capacity]), count_(0) {}
+        : capacity_(capacity), data_(new T[capacity]), rows_(capacity / rowSize_), cols_(rowSize_) {}
 
     ~FastAccessFreezeArray() {
         delete[] data_;
     }
 
-    // Add an element to the array.
     void addElement(T element) {
-        if (count_ < capacity_)
-            data_[count_++] = element;
+        if (count_ < capacity_) {
+            size_t row = count_ / rowSize_;
+            size_t col = count_ % rowSize_;
+            data_[row * cols_ + col] = element;
+            ++count_;
+        }
     }
 
     // Operator to access elements by index.
     T& operator[](size_t index) {
-        return data_[index];
+        size_t row = index / rowSize_;
+        size_t col = index % rowSize_;
+        return data_[row * cols_ + col];
     }
 
     // Function to process elements using ranges.
-void processElements() {
+    void processElements() {
         for (auto element : std::ranges::subrange(data_, data_ + count_)) {
-            // Process each element.
             std::cout << element << " ";
         }
         std::cout << std::endl;
     }
 
+    // Simulated shrink to fit (release unused memory).
+    void shrinkToFit() {
+        if (count_ < capacity_) {
+            T* newData = new T[count_];
+            std::memcpy(newData, data_, count_ * sizeof(T));
+
+            delete[] data_;
+            data_ = newData;
+
+            capacity_ = count_;
+            rows_ = count_ / rowSize_;
+            cols_ = rowSize_;
+        }
+    }
+
 private:
+    const size_t rowSize_ = 1024;
+    size_t rows_;
+    size_t cols_;
     size_t capacity_;
     T* data_;
-    size_t count_;
+    size_t count_ = 0;
 };
 
 int main() {
     {
         FastAccessFreezeArray<int> array(10);
 
-        // Add elements
         for (int i = 0; i < 10; ++i) {
             array.addElement(i);
         }
@@ -60,9 +80,8 @@ int main() {
         }
         std::cout << std::endl;
 
-        // Process elements using ranges.
         array.processElements();
-    } // Array goes out of scope and is destroyed here.
+    }
 
     const int elementsCount = 1000000;
 
@@ -74,18 +93,18 @@ int main() {
         for (int i = 0; i < elementsCount; ++i) {
             array.addElement(i);
         }
-    } // Array goes out of scope and is destroyed here.
+
+        array.shrinkToFit();
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
     std::cout << "Execution time for FastAccessFreezeArray<int>: " << duration.count() << " seconds" << std::endl;
 
-    // Approximate memory usage for FastAccessFreezeArray in bytes.
     size_t memoryUsage = elementsCount * sizeof(int) + sizeof(FastAccessFreezeArray<int>);
     std::cout << "Approximate memory usage for FastAccessFreezeArray<int>: " << memoryUsage << " bytes" << std::endl;
 
-    // Comparison with std::vector<int>.
     {
         std::vector<int> vec;
 
@@ -95,10 +114,11 @@ int main() {
             vec.push_back(i);
         }
 
+        vec.shrink_to_fit();
+
         auto vec_end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> vec_duration = vec_end - vec_start;
 
-        // Approximate memory usage for vector in bytes.
         size_t vec_memoryUsage = elementsCount * sizeof(int) + sizeof(std::vector<int>);
 
         std::cout << "\nComparison with std::vector<int>:" << std::endl;
